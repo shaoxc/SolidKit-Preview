@@ -1,0 +1,160 @@
+name: Build and Release Package
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: 'The working directory for repo'
+        required: false
+        type: string
+        default: '.'
+      release_type:
+        description: 'Publish type'
+        required: True
+        type: string
+
+    secrets:
+      REPO_DISPATCH_TOKEN:
+        required: true
+      TEST_PYPI_API_TOKEN:
+        required: true
+      PYPI_API_TOKEN:
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Publish type'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - debug
+          - build
+          - testpypi
+          - pypi
+          - all
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      release_types: ${{ steps.set-list.outputs.release_types }}
+    steps:
+      - name: Determine which jobs to run
+        id: set-list
+        run: |
+          RELEASE_TYPE="${{ inputs.release_type || github.event.inputs.release_type }}"
+          JOBS_JSON=""
+          case $RELEASE_TYPE in
+            build)
+              JOBS_JSON='["build"]'
+              ;;
+            testpypi)
+              JOBS_JSON='["testpypi", "build"]'
+              ;;
+            pypi)
+              JOBS_JSON='["pypi", "build"]'
+              ;;
+            all)
+              JOBS_JSON='["pypi", "testpypi", "build"]'
+              ;;
+            *)
+              JOBS_JSON='[]'
+              ;;
+          esac
+          echo "Generated job list: $JOBS_JSON"
+          echo "release_types=$JOBS_JSON" >> $GITHUB_OUTPUT
+
+  build_wheels:
+    needs: prepare
+    if: contains(fromJSON(needs.prepare.outputs.release_types), 'build')
+    name: Build wheel for ${{ matrix.python }}-${{ matrix.buildplat[1] }}-${{ matrix.buildplat[2] }}
+    runs-on: ${{ matrix.buildplat[0] }}
+    strategy:
+      fail-fast: false
+      matrix:
+        buildplat:
+        - [ubuntu-latest, manylinux, x86_64]
+        - [macos-latest, macosx, arm64]
+        - [macos-13, macosx, x86_64]
+        #- [ubuntu-latest, manylinux, aarch64]
+        python: ["cp39", "cp310", "cp311", "cp312", "cp313"]
+        exclude:
+        - buildplat: [macos-latest, macosx, arm64]
+          python: "cp38"
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory  }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          repository: shaoxc/SolidKit
+          token: ${{ secrets.REPO_DISPATCH_TOKEN }}
+          ref: main
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21.2
+        env:
+          CIBW_BUILD_VERBOSITY: 1
+          CIBW_BUILD: ${{ matrix.python }}-${{ matrix.buildplat[1] }}*
+          CIBW_ENVIRONMENT: SOLIDKIT_RELEASE=1
+          CIBW_ENVIRONMENT_PASS_LINUX: SOLIDKIT_RELEASE
+          CIBW_ARCHS_LINUX: "auto"
+          CIBW_ARCHS_MACOS: ${{ matrix.buildplat[2] }}
+          CIBW_BEFORE_TEST: "pip install pytest"
+          CIBW_TEST_COMMAND_MACOS: "pytest \"{project}\""
+          CIBW_TEST_COMMAND_LINUX: "pytest \"{project}\""
+          CIBW_TEST_COMMAND_WINDOWS: "python -m solidkit -h"
+          CIBW_TEST_SKIP: "*-*linux_{aarch64,i686}"
+
+      - name: Upload built packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.python }}-${{ matrix.buildplat[1] }}-${{ matrix.buildplat[2] }}
+          path: ./wheelhouse/*.whl
+
+  publish:
+    name: Publish to PyPI and TestPyPI
+    needs: [prepare, build_wheels]
+    runs-on: ubuntu-latest
+    if: needs.build_wheels.result == 'success' && !cancelled()
+
+    steps:
+      - name: Download built packages
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Display downloaded files
+        run: |
+          find ./dist -name '*.whl' -exec mv {} ./dist \;
+          rm -rf ./dist/cp*
+          ls -R ./dist/
+
+      - name: Publish to TestPyPI
+        if: contains(fromJSON(needs.prepare.outputs.release_types), 'testpypi')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: ./dist/
+          skip-existing: true
+
+      - name: Publish to PyPI
+        if: contains(fromJSON(needs.prepare.outputs.release_types), 'pypi')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          packages-dir: ./dist/
+          skip-existing: true
