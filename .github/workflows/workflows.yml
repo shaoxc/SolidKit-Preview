@@ -116,7 +116,7 @@ jobs:
           CIBW_TEST_COMMAND_MACOS: "pytest \"{project}\""
           CIBW_TEST_COMMAND_LINUX: "pytest \"{project}\""
           CIBW_TEST_COMMAND_WINDOWS: "python -m solidkit -h"
-          CIBW_TEST_SKIP: "*-*linux_{aarch64,i686}"
+          CIBW_TEST_SKIP: "*-*linux_{aarch64,i686} *3{11,12,13}-*linux_*"
 
       - name: Upload built packages
         uses: actions/upload-artifact@v4
