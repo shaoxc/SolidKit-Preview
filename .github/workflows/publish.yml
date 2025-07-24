@@ -22,7 +22,7 @@ jobs:
     uses: ./.github/workflows/workflows.yml
     with:
       working-directory: 'repo_codes'
-      release_type: ${{ github.event.inputs.release_type }} || ${{ github.event.client_payload.release_type }} || 'debug'
+      release_type: ${{ github.event.inputs.release_type || github.event.client_payload.release_type || 'debug' }}
     secrets:
       REPO_DISPATCH_TOKEN: ${{ secrets.REPO_DISPATCH_TOKEN }}
       TEST_PYPI_API_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
