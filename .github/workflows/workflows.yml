@@ -181,7 +181,7 @@ jobs:
     #needs: [prepare, publish]
     needs: [prepare, build_wheels]
     runs-on: ubuntu-latest
-    if: success() && !cancelled() && contains(fromJSON(needs.prepare.outputs.release_types), 'pypi')
+    if: needs.build_wheels.result == 'success' && !cancelled() && contains(fromJSON(needs.prepare.outputs.release_types), 'build')
 
     steps:
       - name: Download all wheel artifacts
