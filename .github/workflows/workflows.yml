@@ -181,6 +181,8 @@ jobs:
     #needs: [prepare, publish]
     needs: [prepare, build_wheels]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     if: needs.build_wheels.result == 'success' && !cancelled() && contains(fromJSON(needs.prepare.outputs.release_types), 'build')
 
     steps:
