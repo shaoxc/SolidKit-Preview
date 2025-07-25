@@ -92,11 +92,10 @@ jobs:
       matrix:
         buildplat:
         - [ubuntu-latest, manylinux, x86_64]
-        #- [macos-latest, macosx, arm64]
-        #- [macos-13, macosx, x86_64]
+        - [macos-latest, macosx, arm64]
+        - [macos-13, macosx, x86_64]
         #- [ubuntu-latest, manylinux, aarch64]
-        #python: ["cp39", "cp310", "cp311", "cp312", "cp313"]
-        python: ["cp311"]
+        python: ["cp39", "cp310", "cp311", "cp312", "cp313"]
         exclude:
         - buildplat: [macos-latest, macosx, arm64]
           python: "cp38"
@@ -178,12 +177,11 @@ jobs:
 
   release:
     name: Create GitHub Release
-    #needs: [prepare, publish]
-    needs: [prepare, build_wheels]
+    needs: [prepare, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: needs.build_wheels.result == 'success' && !cancelled() && contains(fromJSON(needs.prepare.outputs.release_types), 'build')
+    if: contains(fromJSON(needs.prepare.outputs.release_types), 'pypi') && !cancelled()
 
     steps:
       - name: Download all wheel artifacts
