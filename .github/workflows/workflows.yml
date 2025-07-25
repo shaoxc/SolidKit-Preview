@@ -10,8 +10,13 @@ on:
         default: '.'
       release_type:
         description: 'Publish type'
-        required: True
+        required: true
         type: string
+      sha:
+        description: 'Commit sha'
+        required: false
+        type: string
+        default: ''
 
     secrets:
       REPO_DISPATCH_TOKEN:
@@ -41,10 +46,11 @@ jobs:
     outputs:
       release_types: ${{ steps.set-list.outputs.release_types }}
     steps:
-      - name: Determine which jobs to run
+      - name: Determine which jobs to run and get commit info
         id: set-list
         run: |
           RELEASE_TYPE="${{ inputs.release_type || github.event.inputs.release_type }}"
+          COMMIT_SHA="${{ inputs.sha }}"
           JOBS_JSON=""
           case $RELEASE_TYPE in
             build)
@@ -65,6 +71,16 @@ jobs:
           esac
           echo "Generated job list: $JOBS_JSON"
           echo "release_types=$JOBS_JSON" >> $GITHUB_OUTPUT
+
+          if [[ -n "$COMMIT_SHA" ]]; then
+            #echo "commit_link=[Triggered by commit in SolidKit](https://github.com/shaoxc/SolidKit/commit/$COMMIT_SHA)" >> $GITHUB_OUTPUT
+            echo 'commit_link<<EOF' >> "$GITHUB_OUTPUT"
+            echo "" >> "$GITHUB_OUTPUT"
+            echo "[Triggered by commit in SolidKit](https://github.com/shaoxc/SolidKit/commit/$COMMIT_SHA)" >> "$GITHUB_OUTPUT"
+            echo 'EOF' >> "$GITHUB_OUTPUT"
+          else
+            echo "commit_link=" >> $GITHUB_OUTPUT
+          fi
 
   build_wheels:
     needs: prepare
@@ -158,3 +174,41 @@ jobs:
           password: ${{ secrets.PYPI_API_TOKEN }}
           packages-dir: ./dist/
           skip-existing: true
+
+  release:
+    name: Create GitHub Release
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: contains(fromJSON(needs.prepare.outputs.release_types), 'pypi') && !cancelled()
+
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Prepare release files
+        run: |
+          find ./dist -name '*.whl' -exec mv {} ./dist \;
+          rm -rf ./dist/cp*
+          ls -R ./dist
+
+      - name: Get version from wheel file
+        id: get_version
+        run: |
+          WHEEL_FILE=$(find ./dist -name "*.whl" | head -n 1)
+          VERSION=$(basename "$WHEEL_FILE" | cut -d- -f2)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Release version determined as: ${VERSION}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: "Release v${{ steps.get_version.outputs.version }}"
+          body: Automated release of version v${{ steps.get_version.outputs.version }}.${{ needs.prepare.outputs.commit_link }}
+          files: dist/*.whl
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
